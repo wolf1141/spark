@@ -51,8 +51,14 @@ def issue_to_workitem(
     acceptance = _extract_list_section(issue_text, "Acceptance criteria")
     depends_on = _extract_linked_ids(issue_text, "Blocked by")
 
-    ac_lines = "\n".join(f'  - "{c}"' for c in acceptance)
-    dep_lines = "\n".join(f"  - {d}" for d in depends_on) if depends_on else "  []"
+    # Build YAML list lines with 6-space indent so that after textwrap.dedent
+    # (which strips 4 spaces) they sit at 2-space under their parent key.
+    if depends_on:
+        dep_lines = "\n".join(f"      - {d}" for d in depends_on)
+    else:
+        dep_lines = "      []"
+
+    ac_lines = "\n".join(f'      - "{c}"' for c in acceptance)
 
     work_item_md = textwrap.dedent(f"""\
     ---
