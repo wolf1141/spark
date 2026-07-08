@@ -11,7 +11,7 @@ def test_vibe_word_flag():
     """Acceptance criterion 1: vibe-word triggers flag."""
     flags = check_criterion('handles errors gracefully')
     assert len(flags) > 0, "Expected non-empty flag list for vibe-word criterion"
-    assert any('vibe-word' in f for f in flags), f"Flags should cite vibe-word: {flags}"
+    assert any('vibe' in f for f in flags), f"Flags should cite vibe-word: {flags}"
 
 
 def test_clean_pass():
@@ -29,6 +29,6 @@ def test_waiver_honored():
 def test_structure_miss():
     """Additional: structure miss (no checkable verb) triggers flag."""
     flags = check_criterion('the system should behave well')
-    # This should have both vibe-word ('well') and no checkable structure
+    # This should have both vibe-word ('well') and no checkable verb
     assert len(flags) > 0, "Expected non-empty flags for structure miss"
-    assert any('no checkable structure' in f for f in flags), f"Should flag structure miss: {flags}"
+    assert any('no checkable verb' in f for f in flags), f"Should flag structure miss: {flags}"

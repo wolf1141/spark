@@ -1,7 +1,7 @@
 """Graph validation for dependency graphs."""
 
-from forge.work_item import WorkItem
-from forge.scheduler import detect_cycles
+from ironlib.work_item import WorkItem
+from ironlib.scheduler import detect_cycles
 
 
 def validate(items: list[WorkItem]) -> list[str]:

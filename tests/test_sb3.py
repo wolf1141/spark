@@ -1,7 +1,7 @@
 """Acceptance tests for spark.graph.validate()."""
 
 from spark.graph import validate
-from forge.work_item import WorkItem
+from ironlib.work_item import WorkItem
 
 
 def make_item(id: str, depends_on: list[str] | None = None) -> WorkItem:

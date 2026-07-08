@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "spark"
 version = "0.1.0"
 dependencies = [
-    "forge"
+    "iron-lib"
 ]
 [tool.setuptools.packages.find]
 include = ["spark*"]

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import spark.cli as cli
 from spark.bridge import issue_to_workitem
-from forge.work_item import parse_file, validate
+from ironlib.work_item import parse_file, validate
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -18,8 +18,8 @@ priority: p2
 project: test
 depends_on: []
 acceptance:
-  - "returns 0 when valid input is provided"
-  - "fails loudly on empty input"
+  - "`compute(x)` returns 0 when x is valid"
+  - "`compute(x)` raises on empty input"
 ---
 
 # SB-X

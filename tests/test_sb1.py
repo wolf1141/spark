@@ -6,10 +6,17 @@ from spark.goal import parse_goal, classify, Goal
 
 
 def test_import():
-    """Acceptance 1: import spark and forge."""
+    """Acceptance 1: import spark and its dependency.
+
+    Originally checked ``import forge`` (SPARK's declared dependency at SB-1
+    time). After OB-1's iron-lib migration, spark no longer imports forge for
+    anything — its actual dependency is iron-lib, so that's what this checks
+    now. The intent (SPARK's declared dependency actually resolves) is
+    unchanged.
+    """
     assert spark is not None
-    import forge
-    assert forge is not None
+    import ironlib
+    assert ironlib is not None
 
 
 SAMPLE_GOAL = """---

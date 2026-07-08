@@ -15,7 +15,7 @@ from pathlib import Path
 from spark.goal import classify
 from spark.lint import check_item
 from spark.graph import validate as graph_validate
-from forge.work_item import load_all
+from ironlib.work_item import load_all
 
 
 def _exit_err(*args) -> None:
