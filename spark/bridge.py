@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import textwrap
 from datetime import datetime
 
 
@@ -39,6 +38,7 @@ def issue_to_workitem(
     item_id: str,
     priority: str = "p2",
     project: str = "iron-ai-assistant",
+    work_repo: str = "crucible",
 ) -> str:
     """Convert a to-issues issue to FORGE work-item markdown.
 
@@ -46,34 +46,36 @@ def issue_to_workitem(
       ``## Acceptance criteria`` → ``acceptance:`` list
       ``## Blocked by``        → ``depends_on:`` list
 
+    Emits ``work_repo`` so the FORGE watcher can route the item to the
+    correct work repository. Defaults to ``crucible``.
+
     Does NOT copy file paths from the issue (they go stale).
     """
     acceptance = _extract_list_section(issue_text, "Acceptance criteria")
     depends_on = _extract_linked_ids(issue_text, "Blocked by")
 
-    # Build YAML list lines with 6-space indent so that after textwrap.dedent
-    # (which strips 4 spaces) they sit at 2-space under their parent key.
+    # Build YAML list lines at 2-space indent under their parent key.
     if depends_on:
-        dep_lines = "\n".join(f"      - {d}" for d in depends_on)
+        dep_lines = "\n".join(f"  - {d}" for d in depends_on)
     else:
-        dep_lines = "      []"
+        dep_lines = "  []"
 
-    ac_lines = "\n".join(f'      - "{c}"' for c in acceptance)
+    ac_lines = "\n".join(f'  - "{c}"' for c in acceptance)
 
-    work_item_md = textwrap.dedent(f"""\
-    ---
-    id: {item_id}
-    priority: {priority}
-    project: {project}
-    depends_on:
-    {dep_lines}
-    acceptance:
-    {ac_lines}
-    ---
+    work_item_md = f"""---
+id: {item_id}
+priority: {priority}
+project: {project}
+work_repo: {work_repo}
+depends_on:
+{dep_lines}
+acceptance:
+{ac_lines}
+---
 
-    # {item_id}
+# {item_id}
 
-    Converted from to-issues issue by spark.bridge on {datetime.now().strftime('%Y-%m-%d')}.
-    """)
+Converted from to-issues issue by spark.bridge on {datetime.now().strftime('%Y-%m-%d')}.
+"""
 
     return work_item_md

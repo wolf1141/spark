@@ -210,6 +210,7 @@ Use tempfile for isolation.
         )
         assert md, "bridge output should not be empty"
         assert "SB-BRIDGE" in md
+        assert "work_repo: crucible" in md
 
         # Normalise bridge output: strip common leading whitespace so the
         # frontmatter fence starts at column 0 as forge.work_item.parse expects.
@@ -221,5 +222,23 @@ Use tempfile for isolation.
             item = parse_file(str(path))
             assert item is not None, "parse_file returned None"
             assert item.id == "SB-BRIDGE"
+            assert item.work_repo == "crucible"
             err = validate(item)
             assert err is None, f"validate returned error: {err}"
+
+    def test_bridge_work_repo_override(self):
+        """issue_to_workitem honours a non-default work_repo."""
+        md = issue_to_workitem(
+            self.ISSUE_TEXT,
+            item_id="SB-ORE",
+            priority="p2",
+            project="test",
+            work_repo="ore",
+        )
+        assert "work_repo: ore" in md
+        md = textwrap.dedent(md)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_md(tmp, "bridge_item.md", md)
+            item = parse_file(str(path))
+            assert item is not None
+            assert item.work_repo == "ore"
