@@ -1,6 +1,8 @@
 """Acceptance tests for SPARK CLI and bridge (SB-4)."""
 
+import io
 import os
+import sys
 import textwrap
 import tempfile
 from pathlib import Path
@@ -101,6 +103,21 @@ class TestSparkCheck:
             exit_code = cli.cmd_check(drafts)
             assert exit_code != 0, f"expected non-zero, got {exit_code}"
 
+    def test_check_reports_parse_error_without_crashing(self):
+        """038: one malformed frontmatter item is reported; the other is checked."""
+        BAD_MD = """---
+id: bad
+acceptance: ["unclosed quote
+---
+
+# bad
+"""
+        with tempfile.TemporaryDirectory() as drafts:
+            _write_md(drafts, "clean.md", CLEAN_MD)
+            _write_md(drafts, "bad.md", BAD_MD)
+            exit_code = cli.cmd_check(drafts)
+            assert exit_code != 0, f"expected non-zero, got {exit_code}"
+
 
 # ── 2. spark deposit ───────────────────────────────────────────────────────
 
@@ -128,6 +145,23 @@ class TestSparkDeposit:
             assert not list(Path(queue).glob("*.md")), "file should not be in forge-queue"
             # File still in drafts
             assert (Path(drafts) / "flagged.md").exists(), "file should remain in drafts"
+
+    def test_deposit_success_cp1252_safe(self):
+        """035: deposit exits 0 even when stdout uses a lossy cp1252 encoding."""
+        with tempfile.TemporaryDirectory() as drafts, \
+             tempfile.TemporaryDirectory() as queue:
+            _write_md(drafts, "clean.md", CLEAN_MD)
+            old_stdout = sys.stdout
+            # Simulate a cp1252 Windows console that cannot encode every glyph.
+            sys.stdout = io.TextIOWrapper(
+                io.BytesIO(), encoding="cp1252", errors="strict"
+            )
+            try:
+                exit_code = cli.cmd_deposit("goal-1", drafts, queue)
+            finally:
+                sys.stdout = old_stdout
+            assert exit_code == 0, f"expected 0, got {exit_code}"
+            assert (Path(queue) / "clean.md").exists(), "file not in forge-queue"
 
 
 # ── 3. spark replan ────────────────────────────────────────────────────────
@@ -200,6 +234,21 @@ class TestSparkBridge:
 Use tempfile for isolation.
 """
 
+    WRAPPED_ISSUE = """## Acceptance criteria
+- Named test `test_window_basic` passes: with `today=2026-02-20` and
+  window_days=14 the registry returns the occasion within the window.
+- Another criterion.
+
+## Blocked by
+- [[SB-1]] continued on the next
+  wrapped line
+"""
+
+    QUOTED_ISSUE = """## Acceptance criteria
+- prints a single "no upcoming occasions" line
+- handles empty input
+"""
+
     def test_bridge_roundtrip(self):
         """issue_to_workitem → parse_file → validate returns None."""
         md = issue_to_workitem(
@@ -242,3 +291,37 @@ Use tempfile for isolation.
             item = parse_file(str(path))
             assert item is not None
             assert item.work_repo == "ore"
+
+    def test_bridge_keeps_wrapped_bullet_lines(self):
+        """036: continuation lines are folded into their parent bullet."""
+        md = textwrap.dedent(issue_to_workitem(
+            self.WRAPPED_ISSUE,
+            item_id="SB-WRAP",
+            priority="p2",
+            project="test",
+        ))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_md(tmp, "wrap_item.md", md)
+            item = parse_file(str(path))
+        assert item is not None
+        assert len(item.acceptance) == 2
+        first = item.acceptance[0]
+        assert "window_days=14" in first
+        assert "the registry returns" in first
+        assert first.startswith("Named test")
+        assert item.depends_on == ["SB-1"]
+
+    def test_bridge_quoted_criterion_roundtrips(self):
+        """038: criteria containing double quotes produce valid YAML."""
+        md = textwrap.dedent(issue_to_workitem(
+            self.QUOTED_ISSUE,
+            item_id="SB-QUOTE",
+            priority="p2",
+            project="test",
+        ))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_md(tmp, "quote_item.md", md)
+            item = parse_file(str(path))
+        assert item is not None
+        assert len(item.acceptance) == 2
+        assert 'prints a single "no upcoming occasions" line' in item.acceptance

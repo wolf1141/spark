@@ -37,6 +37,9 @@ def cmd_check(draft_dir: str, forge_queue: str | None = None) -> int:
 
     # Lint each item's acceptance criteria
     for item in items:
+        if item.parse_error:
+            errors.append(item.parse_error)
+            continue
         flags = check_item({"acceptance": item.acceptance})
         for idx_str, flag_list in flags.items():
             for flag in flag_list:
@@ -83,7 +86,7 @@ def cmd_deposit(goal_id: str, drafts_dir: str, forge_queue: str) -> int:
     except OSError:
         pass
 
-    print(f"deposited {len(md_files)} item(s) from {goal_id} → forge-queue")
+    print(f"deposited {len(md_files)} item(s) from {goal_id} to forge-queue")
     return 0
 
 
@@ -191,7 +194,7 @@ def cmd_replan(md_path: str) -> int:
             count=1,
         )
     path.write_text(text, encoding="utf-8")
-    print(f"replan_count: {current} → {new_count} ({path.name})")
+    print(f"replan_count: {current} -> {new_count} ({path.name})")
     return 0
 
 
