@@ -325,3 +325,160 @@ Use tempfile for isolation.
         assert item is not None
         assert len(item.acceptance) == 2
         assert 'prints a single "no upcoming occasions" line' in item.acceptance
+
+
+# ── 6. gate-hole regressions (2026-07-10 audit: H1/H2/H3/M3) ─────────────────
+
+EMPTY_ACCEPTANCE_MD = """---
+id: SB-EMPTY
+priority: p2
+project: test
+depends_on: []
+acceptance: []
+---
+
+# SB-EMPTY
+"""
+
+NO_ACCEPTANCE_MD = """---
+id: SB-NOACC
+priority: p2
+project: test
+depends_on: []
+---
+
+# SB-NOACC
+"""
+
+JUNK_MD = """this file has no frontmatter fence at all
+just some prose that will never parse into a work item
+"""
+
+
+class TestH1AcceptancePresence:
+    """H1: empty/absent acceptance must fail `spark check`."""
+
+    def test_empty_acceptance_list_fails_check(self):
+        with tempfile.TemporaryDirectory() as drafts:
+            _write_md(drafts, "empty.md", EMPTY_ACCEPTANCE_MD)
+            assert cli.cmd_check(drafts) != 0
+
+    def test_missing_acceptance_key_fails_check(self):
+        with tempfile.TemporaryDirectory() as drafts:
+            _write_md(drafts, "noacc.md", NO_ACCEPTANCE_MD)
+            assert cli.cmd_check(drafts) != 0
+
+
+class TestH2DepositOnlyGatedFiles:
+    """H2: deposit must never move a file the gate could not inspect."""
+
+    def test_junk_alone_fails_check_and_deposit_naming_it(self, capsys):
+        with tempfile.TemporaryDirectory() as drafts, \
+             tempfile.TemporaryDirectory() as queue:
+            _write_md(drafts, "junk.md", JUNK_MD)
+
+            assert cli.cmd_check(drafts) != 0
+            assert "junk.md" in capsys.readouterr().out
+
+            assert cli.cmd_deposit("goal-1", drafts, queue) != 0
+            assert "junk.md" in capsys.readouterr().out
+            # nothing moved
+            assert not list(Path(queue).glob("*.md"))
+            assert (Path(drafts) / "junk.md").exists()
+
+    def test_mixed_batch_refuses_and_moves_nothing(self):
+        with tempfile.TemporaryDirectory() as drafts, \
+             tempfile.TemporaryDirectory() as queue:
+            _write_md(drafts, "clean.md", CLEAN_MD)
+            _write_md(drafts, "junk.md", JUNK_MD)
+
+            assert cli.cmd_deposit("goal-1", drafts, queue) != 0
+            # nothing moved — the valid item must not ride the batch through
+            assert not list(Path(queue).glob("*.md"))
+            assert (Path(drafts) / "clean.md").exists()
+            assert (Path(drafts) / "junk.md").exists()
+
+
+class TestH3ReplanEscalationAlwaysWrites:
+    """H3: escalation must actually write status when the item has none."""
+
+    NO_STATUS_REPLAN_2_MD = """---
+id: RN-NS
+replan_count: 2
+---
+
+# RN-NS
+
+Some body text here.
+replan_count: 99
+"""
+
+    def test_escalate_inserts_status_when_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_md(tmp, "rnns.md", self.NO_STATUS_REPLAN_2_MD)
+            exit_code = cli.cmd_replan(str(path))
+            assert exit_code == 0
+            text = path.read_text(encoding="utf-8")
+            assert "status: escalated" in text, f"status not inserted:\n{text}"
+
+    BODY_ONLY_REPLAN_MD = """---
+id: RN-BODY
+status: active
+---
+
+# RN-BODY
+
+Some prose.
+replan_count: 5
+"""
+
+    def test_body_replan_count_line_ignored(self):
+        # frontmatter has NO replan_count; a stray `replan_count: 5` sits in the
+        # body. Scoped correctly, the frontmatter count reads 0 → increment to 1
+        # (NOT escalate off the body's 5), and the body line is left untouched.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_md(tmp, "rnbody.md", self.BODY_ONLY_REPLAN_MD)
+            exit_code = cli.cmd_replan(str(path))
+            assert exit_code == 0
+            text = path.read_text(encoding="utf-8")
+            assert "replan_count: 1" in text, f"frontmatter not incremented:\n{text}"
+            assert "status: escalated" not in text, "body line wrongly triggered escalation"
+            # the stray body line is untouched, not incremented/consumed
+            assert "replan_count: 5" in text
+
+
+class TestM3DuplicateIds:
+    """M3: duplicate item ids must be caught, not set-collapsed."""
+
+    DUP_A = """---
+id: SB-DUP
+priority: p2
+project: test
+depends_on: []
+acceptance:
+  - "`f()` returns 0"
+---
+
+# first
+"""
+
+    DUP_B = """---
+id: SB-DUP
+priority: p2
+project: test
+depends_on: []
+acceptance:
+  - "`g()` returns 1"
+---
+
+# second
+"""
+
+    def test_duplicate_ids_fail_check(self, capsys):
+        with tempfile.TemporaryDirectory() as drafts:
+            _write_md(drafts, "a.md", self.DUP_A)
+            _write_md(drafts, "b.md", self.DUP_B)
+            assert cli.cmd_check(drafts) != 0
+            out = capsys.readouterr().out
+            assert "SB-DUP" in out
+            assert "Duplicate" in out

@@ -15,7 +15,7 @@ from pathlib import Path
 from spark.goal import classify
 from spark.lint import check_item
 from spark.graph import validate as graph_validate
-from ironlib.work_item import load_all
+from ironlib.work_item import load_all, validate as validate_item
 
 
 def _exit_err(*args) -> None:
@@ -23,22 +23,42 @@ def _exit_err(*args) -> None:
     raise SystemExit(1)
 
 
+def _norm(p) -> str:
+    """Normalized absolute path for cross-referencing globbed vs parsed files."""
+    return os.path.normcase(os.path.abspath(str(p)))
+
+
 def cmd_check(draft_dir: str, forge_queue: str | None = None) -> int:
-    """Parse batch, run linter + graph gate. Exit 0 iff clean.
+    """Parse batch, run schema + linter + graph gate. Exit 0 iff clean.
 
     ``forge_queue`` is unused but accepted for interface compatibility.
     """
     items = load_all(draft_dir)
-    if not items:
+    md_files = sorted(Path(draft_dir).glob("*.md"))
+    if not items and not md_files:
         print("SKIP: no items in", draft_dir)
         return 0
 
     errors: list[str] = []
 
-    # Lint each item's acceptance criteria
+    # Any .md file that load_all could not turn into a work item (no
+    # frontmatter fence at all) is silently dropped by the parser — flag it
+    # here so it can never ride a clean batch into forge-queue via deposit.
+    parsed_paths = {_norm(it.source_path) for it in items if it.source_path}
+    for md in md_files:
+        if _norm(md) not in parsed_paths:
+            errors.append(f"{md.name}: cannot parse frontmatter (no work item)")
+
+    # Schema + lint each parsed item
     for item in items:
         if item.parse_error:
             errors.append(item.parse_error)
+            continue
+        # Schema gate: id present, acceptance non-empty, priority known.
+        # This is the only check that catches empty/absent acceptance.
+        schema_err = validate_item(item)
+        if schema_err:
+            errors.append(schema_err)
             continue
         flags = check_item({"acceptance": item.acceptance})
         for idx_str, flag_list in flags.items():
@@ -58,7 +78,12 @@ def cmd_check(draft_dir: str, forge_queue: str | None = None) -> int:
 
 
 def cmd_deposit(goal_id: str, drafts_dir: str, forge_queue: str) -> int:
-    """Check drafts_dir, then move .md files to forge_queue if clean."""
+    """Check drafts_dir, then move ONLY the gated work-item files to forge_queue.
+
+    ``cmd_check`` fails the whole batch if any ``.md`` in the dir failed to parse
+    or failed a gate, so a clean check means every parsed item's file is safe to
+    move — deposit moves exactly that set, never a raw glob.
+    """
     # Run check first
     exit_code = cmd_check(drafts_dir, forge_queue)
     if exit_code != 0:
@@ -67,14 +92,16 @@ def cmd_deposit(goal_id: str, drafts_dir: str, forge_queue: str) -> int:
 
     draft_path = Path(drafts_dir)
     queue_path = Path(forge_queue)
-    queue_path.mkdir(parents=True, exist_ok=True)
 
-    md_files = list(draft_path.glob("*.md"))
-    if not md_files:
+    # Move only the exact files that parsed and passed check.
+    items = load_all(drafts_dir)
+    src_files = [Path(it.source_path) for it in items if it.source_path]
+    if not src_files:
         print("nothing to deposit", file=sys.stderr)
         return 1
 
-    for src in md_files:
+    queue_path.mkdir(parents=True, exist_ok=True)
+    for src in src_files:
         dst = queue_path / src.name
         src.rename(dst)
 
@@ -86,7 +113,7 @@ def cmd_deposit(goal_id: str, drafts_dir: str, forge_queue: str) -> int:
     except OSError:
         pass
 
-    print(f"deposited {len(md_files)} item(s) from {goal_id} to forge-queue")
+    print(f"deposited {len(src_files)} item(s) from {goal_id} to forge-queue")
     return 0
 
 
@@ -157,43 +184,59 @@ def cmd_replan(md_path: str) -> int:
 
     text = path.read_text(encoding="utf-8")
 
-    # Read current replan_count
-    m = re.search(r"^replan_count\s*:\s*(\d+)", text, re.MULTILINE)
+    # Isolate the frontmatter block so replan_count/status only ever match the
+    # fenced YAML, never a stray line in the body (L4).
+    fm = re.match(r"(?s)\A(---\s*\n)(.*?\n)(---\s*\n?)", text)
+    if fm:
+        head, block, fence = fm.group(1), fm.group(2), fm.group(3)
+        tail = text[fm.end():]
+    else:
+        head, block, fence, tail = "", "", "", text
+
+    # Read current replan_count from the frontmatter only
+    m = re.search(r"^replan_count\s*:\s*(\d+)", block, re.MULTILINE)
     current = int(m.group(1)) if m else 0
 
     if current >= 2:
-        # Escalate: set status and leave in queue (no forge-queue write)
-        if "status: escalated" not in text:
-            text = re.sub(
-                r"(^status\s*:\s*)(\S+)",
-                r"\1escalated",
-                text,
-                count=1,
-                flags=re.MULTILINE,
-            )
-            path.write_text(text, encoding="utf-8")
-        print(f"escalated: {path.name} (replan_count={current}) — needs Wolf")
+        # Escalate: set status and leave in queue (no forge-queue write).
+        sm = re.search(r"^status\s*:\s*(\S+)", block, re.MULTILINE)
+        wrote = False
+        if sm:
+            if sm.group(1) != "escalated":
+                block = re.sub(
+                    r"^(status\s*:\s*)\S+",
+                    r"\1escalated",
+                    block,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+                wrote = True
+        else:
+            # No status field — insert one (mirror the replan_count insert below)
+            block = f"status: escalated\n{block}"
+            wrote = True
+
+        if wrote:
+            path.write_text(head + block + fence + tail, encoding="utf-8")
+            print(f"escalated: {path.name} (replan_count={current}) — needs Wolf")
+        else:
+            print(f"already escalated: {path.name} (replan_count={current}) — needs Wolf")
         return 0
 
     # Increment replan_count
     new_count = current + 1
     if m:
-        text = re.sub(
+        block = re.sub(
             rf"^replan_count\s*:\s*{current}",
             f"replan_count: {new_count}",
-            text,
+            block,
             count=1,
             flags=re.MULTILINE,
         )
     else:
-        # Insert after the first frontmatter field
-        text = re.sub(
-            r"(^---\s*\n)",
-            f"\\1replan_count: {new_count}\n",
-            text,
-            count=1,
-        )
-    path.write_text(text, encoding="utf-8")
+        # Insert as the first frontmatter field
+        block = f"replan_count: {new_count}\n{block}"
+    path.write_text(head + block + fence + tail, encoding="utf-8")
     print(f"replan_count: {current} -> {new_count} ({path.name})")
     return 0
 

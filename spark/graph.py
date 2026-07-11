@@ -10,7 +10,17 @@ def validate(items: list[WorkItem]) -> list[str]:
     Returns a list of error strings. An empty list means the graph is valid.
     """
     errors: list[str] = []
-    ids = {item.id for item in items}
+
+    # Duplicate ids — a set would silently collapse them, aliasing completions
+    # and the cycle map. Flag each colliding id once.
+    seen: set[str] = set()
+    reported: set[str] = set()
+    for item in items:
+        if item.id in seen and item.id not in reported:
+            errors.append(f"Duplicate id: '{item.id}' appears more than once in the batch.")
+            reported.add(item.id)
+        seen.add(item.id)
+    ids = seen
 
     # Dangling dependencies
     for item in items:
@@ -21,7 +31,7 @@ def validate(items: list[WorkItem]) -> list[str]:
                     " which is not in the batch."
                 )
 
-    # Cycle detection (reuse forge.scheduler.detect_cycles)
+    # Cycle detection (reuse ironlib.scheduler.detect_cycles)
     cycles = detect_cycles(items)
     for cycle in cycles:
         errors.append(f"Cycle detected: {cycle}")
