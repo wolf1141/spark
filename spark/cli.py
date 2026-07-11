@@ -14,6 +14,7 @@ from pathlib import Path
 
 from spark.goal import classify
 from spark.lint import check_item
+from spark.fidelity import check_fidelity
 from spark.graph import validate as graph_validate
 from ironlib.work_item import load_all, validate as validate_item
 
@@ -64,6 +65,13 @@ def cmd_check(draft_dir: str, forge_queue: str | None = None) -> int:
         for idx_str, flag_list in flags.items():
             for flag in flag_list:
                 errors.append(f"{item.id} criterion {int(idx_str) + 1}: {flag}")
+        # Fidelity gate: staged criteria must match the source issue's.
+        # Independent re-extraction (spark.fidelity) so a bridge bug cannot
+        # corrupt both sides identically — audit finding C / issue 036.
+        if item.source_path:
+            errors.extend(
+                check_fidelity(item.id, item.source_path, item.acceptance)
+            )
 
     # Graph validation
     graph_errors = graph_validate(items)
